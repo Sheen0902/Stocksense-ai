@@ -66,7 +66,7 @@ Designed as an educational tool for anyone interested in understanding stock mar
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/Sheen0902/stocksense-ai.git
+git clone https://github.com/YOUR_USERNAME/stocksense-ai.git
 cd stocksense-ai
 
 # 2. Install dependencies
@@ -117,4 +117,4 @@ MIT License — free to use, modify, and distribute with attribution.
 
 ---
 
-<p align="center">Built with ☀️ by Sheen · Powered by Python & Streamlit</p>
+<p align="center">Built with ☀️ · Powered by Python & Streamlit</p>

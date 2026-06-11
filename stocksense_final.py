@@ -270,8 +270,12 @@ ss("ticker2_val",  "")
 ss("watchlist",    [])
 ss("model_type",   "Linear Regression")
 
-def set_t(sym):  st.session_state.ticker_val  = sym
-def set_t2(sym): st.session_state.ticker2_val = sym
+def set_t(sym):
+    # Directly set the session_state key that the text_input is bound to
+    st.session_state.ticker_val  = sym.strip().upper()
+
+def set_t2(sym):
+    st.session_state.ticker2_val = sym.strip().upper()
 def add_watch(sym):
     if sym and sym not in st.session_state.watchlist:
         st.session_state.watchlist.append(sym)
@@ -539,20 +543,17 @@ with st.sidebar:
 
     # ── Primary stock ─────────────────────────────────────────
     st.markdown('<div class="slabel">Primary Stock</div>', unsafe_allow_html=True)
-    ticker = st.text_input("", value=st.session_state.ticker_val,
-                           key="inp_ticker", label_visibility="collapsed").strip().upper()
-    st.session_state.ticker_val = ticker
+    # Key matches session_state key — Streamlit syncs automatically, no value= needed
+    ticker = st.text_input("", key="ticker_val",
+                           label_visibility="collapsed").strip().upper()
 
     # ── Compare stock ─────────────────────────────────────────
     st.markdown('<div class="slabel">⚖️ Compare Stock (optional)</div>', unsafe_allow_html=True)
     st.markdown('<div style="font-size:.65rem;color:rgba(255,200,80,.5);margin-bottom:4px">Type a ticker below OR use Quick Compare buttons ↓</div>', unsafe_allow_html=True)
-    _t2_input = st.text_input("", value=st.session_state.ticker2_val,
-                              key="inp_ticker2", placeholder="e.g. MSFT  TSLA  TCS.NS  BP.L",
-                              label_visibility="collapsed").strip().upper()
-    # Always sync: if user typed something, update session_state
-    if _t2_input != st.session_state.ticker2_val:
-        st.session_state.ticker2_val = _t2_input
-    ticker2 = st.session_state.ticker2_val  # authoritative source
+    st.text_input("", key="ticker2_val",
+                  placeholder="e.g. MSFT  TSLA  TCS.NS  BP.L",
+                  label_visibility="collapsed")
+    ticker2 = st.session_state.ticker2_val.strip().upper()  # authoritative source
 
     # ── Stock quick-pick buttons ──────────────────────────────
     for group, pairs in TICKER_GROUPS.items():
@@ -579,11 +580,17 @@ with st.sidebar:
 
     # ── Watchlist ─────────────────────────────────────────────
     st.markdown('<div class="slabel">⭐ Watchlist</div>', unsafe_allow_html=True)
-    watch_add = st.text_input("", placeholder="Add ticker e.g. NVDA",
-                              key="inp_watch", label_visibility="collapsed")
+    st.text_input("", placeholder="Add ticker e.g. NVDA",
+                  key="watch_input_val", label_visibility="collapsed")
     c1, c2 = st.columns(2)
-    if c1.button("➕ Add",    use_container_width=True): add_watch(watch_add.upper().strip())
-    if c2.button("📊 Load",   use_container_width=True): set_t(watch_add.upper().strip())
+    def _do_add_watch():
+        sym = st.session_state.get("watch_input_val","").strip().upper()
+        if sym: add_watch(sym)
+    def _do_load_watch():
+        sym = st.session_state.get("watch_input_val","").strip().upper()
+        if sym: set_t(sym)
+    c1.button("➕ Add",  use_container_width=True, on_click=_do_add_watch)
+    c2.button("📊 Load", use_container_width=True, on_click=_do_load_watch)
 
     if st.session_state.watchlist:
         wprices = fetch_watchlist_prices(tuple(st.session_state.watchlist))
@@ -685,6 +692,10 @@ st.markdown('<div class="div"></div>', unsafe_allow_html=True)
 # ═══════════════════════════════════════════════════════════════════════════════
 #  MAIN ANALYSIS
 # ═══════════════════════════════════════════════════════════════════════════════
+# Read ticker from session_state (widget key binding keeps it current)
+ticker  = st.session_state.get("ticker_val",  "AAPL").strip().upper() or "AAPL"
+ticker2 = st.session_state.get("ticker2_val", "").strip().upper()
+
 if not ticker:
     st.info("Enter a ticker in the sidebar to get started."); st.stop()
 
@@ -910,8 +921,7 @@ with tabs[5]:
 
 # ── Tab 7: Comparison ─────────────────────────────────────────────────────────
 with tabs[6]:
-    # Always read from session_state — ensures button clicks on other tabs are respected
-    ticker2 = st.session_state.ticker2_val
+    # ticker2 already set from session_state above the tabs
     if not ticker2 or ticker2.strip() == "" or ticker2 == ticker:
         st.markdown("""
         <div style="text-align:center;padding:3rem 1rem">

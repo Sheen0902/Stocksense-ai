@@ -277,10 +277,17 @@ def set_t(sym):
 def set_t2(sym):
     st.session_state.ticker2_val = sym.strip().upper()
 def add_watch(sym):
+    sym = sym.strip().upper()
     if sym and sym not in st.session_state.watchlist:
-        st.session_state.watchlist.append(sym)
+        # Reassign entirely — Streamlit Cloud needs reassignment to detect changes
+        st.session_state.watchlist = st.session_state.watchlist + [sym]
+
 def rm_watch(sym):
     st.session_state.watchlist = [s for s in st.session_state.watchlist if s != sym]
+
+def load_from_watch(sym):
+    """Load a watchlist stock as primary ticker."""
+    st.session_state.ticker_val = sym.strip().upper()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  DATA FUNCTIONS  (all cached, batched where possible)
@@ -417,7 +424,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 FEATURES = ["MA5","MA20","MA50","EMA12","EMA26","MACD",
             "Return","Lag1","Lag2","Lag5","Vol20","VolRatio","RSI","BB_pct"]
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False, hash_funcs={"builtins.str": lambda x: x})
 def train_and_predict(ticker: str, model_type: str):
     """Full pipeline: fetch → features → train → predict. Cached by ticker+model."""
     df_raw = fetch_stock(ticker)
@@ -580,36 +587,65 @@ with st.sidebar:
 
     # ── Watchlist ─────────────────────────────────────────────
     st.markdown('<div class="slabel">⭐ Watchlist</div>', unsafe_allow_html=True)
-    st.text_input("", placeholder="Add ticker e.g. NVDA",
-                  key="watch_input_val", label_visibility="collapsed")
-    c1, c2 = st.columns(2)
-    def _do_add_watch():
-        sym = st.session_state.get("watch_input_val","").strip().upper()
-        if sym: add_watch(sym)
-    def _do_load_watch():
-        sym = st.session_state.get("watch_input_val","").strip().upper()
-        if sym: set_t(sym)
-    c1.button("➕ Add",  use_container_width=True, on_click=_do_add_watch)
-    c2.button("📊 Load", use_container_width=True, on_click=_do_load_watch)
 
-    if st.session_state.watchlist:
-        wprices = fetch_watchlist_prices(tuple(st.session_state.watchlist))
-        for sym in st.session_state.watchlist:
+    # Input + Add button — use on_click with lambda to read input at click time
+    st.text_input("", placeholder="Type ticker e.g. NVDA then click Add",
+                  key="watch_input_val", label_visibility="collapsed")
+
+    wc1, wc2 = st.columns(2)
+
+    def _add_from_input():
+        val = st.session_state.get("watch_input_val", "").strip().upper()
+        if val:
+            add_watch(val)
+
+    def _load_from_input():
+        val = st.session_state.get("watch_input_val", "").strip().upper()
+        if val:
+            st.session_state.ticker_val = val
+
+    wc1.button("➕ Add to list",  key="wb_add",  on_click=_add_from_input,  use_container_width=True)
+    wc2.button("📊 Load stock",   key="wb_load", on_click=_load_from_input, use_container_width=True)
+
+    # Display watchlist
+    watchlist_now = st.session_state.watchlist
+    if watchlist_now:
+        # Fetch prices in one batched call
+        wprices = fetch_watchlist_prices(tuple(watchlist_now))
+
+        for sym in watchlist_now:
+            # Price row
             info = wprices.get(sym)
             if info:
                 pr, pc = info
-                col = "#FFB800" if pc >= 0 else "#FF4D4D"
-                pcts = f'{ar(pc)} {abs(pc):.2f}%'
-                st.markdown(
-                    f'<div class="witem">'
-                    f'<span class="wsym" style="cursor:pointer">{sym}</span>'
-                    f'<span class="wpct" style="color:{col}">{pcts}</span>'
-                    f'</div>', unsafe_allow_html=True)
-            rcol1, rcol2 = st.columns(2)
-            rcol1.button("Load", key=f"wl_{sym}",   on_click=set_t,    args=(sym,), use_container_width=True)
-            rcol2.button("✕",    key=f"wrm_{sym}",  on_click=rm_watch, args=(sym,), use_container_width=True)
+                col  = "#FFB800" if pc >= 0 else "#FF4D4D"
+                pstr = f"{ar(pc)} {abs(pc):.2f}%"
+                pr_str = fmt_price(pr) if pr < 100000 else f"${pr:,.0f}"
+            else:
+                col  = "rgba(255,245,224,0.4)"
+                pstr = "loading…"
+                pr_str = "—"
+
+            st.markdown(
+                f'<div class="witem">'
+                f'<span class="wsym">{sym}</span>'
+                f'<span style="font-size:.75rem;color:rgba(255,245,224,.6)">{pr_str}</span>'
+                f'<span class="wpct" style="color:{col};margin-left:auto">{pstr}</span>'
+                f'</div>', unsafe_allow_html=True)
+
+            # Load and Remove buttons — unique keys using sym
+            ra, rb = st.columns(2)
+            ra.button(f"📈 Load",    key=f"wload_{sym}", on_click=load_from_watch, args=(sym,), use_container_width=True)
+            rb.button(f"✕ Remove",   key=f"wrm_{sym}",   on_click=rm_watch,        args=(sym,), use_container_width=True)
+
+        # Clear all button
+        st.markdown("<div style='margin-top:6px'></div>", unsafe_allow_html=True)
+        if st.button("🗑 Clear all", key="wb_clear", use_container_width=True):
+            st.session_state.watchlist = []
+            st.rerun()
     else:
-        st.caption("No stocks in watchlist yet.")
+        st.markdown('<div style="font-size:.78rem;color:rgba(255,245,224,.38);padding:8px 0">'
+                    'Type a ticker above and click ➕ Add to list</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="div"></div>', unsafe_allow_html=True)
 
@@ -800,9 +836,11 @@ with tabs[0]:
     fig.update_layout(title=f"<b>{ticker}</b> — Last 90 Days (candlestick)",
                       xaxis_rangeslider_visible=False, **CHART_BASE)
     st.plotly_chart(fig, use_container_width=True)
-    if st.button("⭐ Add to Watchlist", key="add_watch_main"):
-        add_watch(ticker)
-        st.success(f"{ticker} added to watchlist!")
+    def _add_current_to_watch():
+        add_watch(st.session_state.get("ticker_val","").strip().upper())
+    st.button("⭐ Add to Watchlist", key="add_watch_main", on_click=_add_current_to_watch)
+    if ticker in st.session_state.watchlist:
+        st.success(f"✅ {ticker} is in your watchlist")
 
 # ── Tab 2: Predictions ────────────────────────────────────────────────────────
 with tabs[1]:
@@ -939,8 +977,16 @@ with tabs[6]:
         st.markdown("**Quick compare right here:**")
         qc_inline = st.text_input("Enter ticker to compare", placeholder="e.g. MSFT, TSLA, TCS.NS",
                                    key="qc_inline_input").strip().upper()
-        if st.button("⚖️ Compare Now", use_container_width=True) and qc_inline:
-            st.session_state.ticker2_val = qc_inline
+        col_btn1, col_btn2 = st.columns(2)
+        if col_btn1.button("⚖️ Compare Now", use_container_width=True):
+            val = st.session_state.get("qc_inline_input", "").strip().upper()
+            if val:
+                st.session_state.ticker2_val = val
+                st.rerun()
+            else:
+                st.warning("Please enter a ticker symbol first.")
+        if col_btn2.button("✕ Clear Compare", use_container_width=True):
+            st.session_state.ticker2_val = ""
             st.rerun()
     else:
         with st.spinner(f"Analysing {ticker2}…"):
@@ -949,10 +995,15 @@ with tabs[6]:
         if r2 is None:
             st.error(f"Could not load data for **{ticker2}**.")
         else:
-            lc2 = r2["latest_close"]; np2 = r2["next_pred"]
-            pc2 = (np2 - lc2) / lc2 * 100
-            chg2 = lc2 - r2["prev_close"]
-            chgpct2 = chg2 / r2["prev_close"] * 100
+            try:
+                lc2 = float(r2["latest_close"])
+                np2 = float(r2["next_pred"])
+                pc2 = (np2 - lc2) / lc2 * 100
+                chg2 = lc2 - float(r2["prev_close"])
+                chgpct2 = chg2 / float(r2["prev_close"]) * 100
+            except (KeyError, TypeError, ZeroDivisionError) as e:
+                st.error(f"Error reading data for {ticker2}: {e}")
+                st.stop()
 
             c1, c2 = st.columns(2)
             with c1:
@@ -993,8 +1044,20 @@ with tabs[6]:
             common = df_raw["Close"].align(r2["df_raw"]["Close"], join="inner")
             if len(common[0]) > 20:
                 corr = float(common[0].pct_change().corr(common[1].pct_change()))
-                st.metric("Return Correlation", f"{corr:.3f}",
+                corr_col1, corr_col2 = st.columns([1,2])
+                corr_col1.metric("Return Correlation", f"{corr:.3f}",
                           help="1 = perfectly correlated, 0 = uncorrelated, -1 = inverse")
+                interp = ("Moves almost identically — low diversification benefit" if corr > 0.8 else
+                          "Moderately correlated — some diversification" if corr > 0.4 else
+                          "Weakly correlated — good diversification" if corr > 0 else
+                          "Negative correlation — acts as a partial hedge")
+                corr_col2.info(f"📊 {interp}")
+
+            # Reset button
+            st.markdown("---")
+            if st.button("✕  Clear comparison", use_container_width=False):
+                st.session_state.ticker2_val = ""
+                st.rerun()
 
 # ── Tab 8: Portfolio ──────────────────────────────────────────────────────────
 with tabs[7]:
